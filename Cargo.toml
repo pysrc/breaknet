@@ -1,0 +1,8 @@
+[workspace]
+
+members = [
+    "bncom",
+    "bnserver",
+    "bnclient",
+    "gencertificate"
+]
