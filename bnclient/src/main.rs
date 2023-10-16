@@ -2,14 +2,7 @@ mod client;
 
 fn main() {
     simple_logger::init_with_level(log::Level::Info).unwrap();
-    let mut cfgname = String::new();
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() == 1 {
-        cfgname.push_str("config.json");
-    } else {
-        cfgname.push_str(&args[1]);
-    }
-    let cfg = bncom::config::Config::from_file(&cfgname).unwrap();
+    let cfg = bncom::config::get_config();
 
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(3)

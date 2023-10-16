@@ -1,5 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
+use std::str::FromStr;
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
@@ -65,6 +67,41 @@ impl Config {
             Err(e) => {
                 panic!("error {}", e)
             }
+        }
+    }
+}
+
+/// The config
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Config type: 1: json file, 2: base64 string
+    #[arg(short, long, default_value_t = 1)]
+    type_of_config: u8,
+
+    /// Json file config
+    #[arg(short, long, default_value_t = String::from_str("config.json").unwrap())]
+    json_file_config: String,
+
+    /// Base64 config
+    #[arg(short, long, default_value_t = String::from_str("").unwrap())]
+    base64_config: String,
+}
+
+// 获取配置
+pub fn get_config() -> Config {
+    let args = Args::parse();
+    match args.type_of_config {
+        1 => {
+            Config::from_file(&args.json_file_config).unwrap()
+        }
+        2 => {
+            let b64b = crate::base64::base64_decode(&args.base64_config);
+            let b64s = String::from_utf8_lossy(&b64b);
+            Config::from_str(&b64s).unwrap()
+        }
+        _ => {
+            panic!("No config")
         }
     }
 }
