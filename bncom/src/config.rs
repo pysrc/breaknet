@@ -56,13 +56,14 @@ impl Config {
         return res;
     }
 
-    pub fn from_file(filename: &str) -> Option<Config> {
+    pub fn from_file(filename: &str) -> (String, Option<Config>) {
         let f = File::open(filename);
         match f {
             Ok(mut file) => {
-                let mut c = String::new();
-                file.read_to_string(&mut c).unwrap();
-                Config::from_str(&c)
+                let mut s = String::new();
+                file.read_to_string(&mut s).unwrap();
+                let c = Config::from_str(&s);
+                (s, c)
             }
             Err(e) => {
                 panic!("error {}", e)
@@ -89,16 +90,18 @@ struct Args {
 }
 
 // 获取配置
-pub fn get_config() -> Config {
+pub fn get_config() -> (String, Config) {
     let args = Args::parse();
     match args.type_of_config {
         1 => {
-            Config::from_file(&args.json_file_config).unwrap()
+            let (s, o) = Config::from_file(&args.json_file_config);
+            (s, o.unwrap())
         }
         2 => {
             let b64b = crate::base64::base64_decode(&args.base64_config);
-            let b64s = String::from_utf8_lossy(&b64b);
-            Config::from_str(&b64s).unwrap()
+            let b64s = String::from_utf8_lossy(&b64b).to_string();
+            let c = Config::from_str(&b64s).unwrap();
+            (b64s, c)
         }
         _ => {
             panic!("No config")
@@ -158,7 +161,8 @@ fn test_from_str() {
 
 #[test]
 fn test_from_file() {
-    let c = Config::from_file("config.json").unwrap();
+    let (_, c) = Config::from_file("config.json");
+    let c = c.unwrap();
     assert_eq!(c.server.as_ref().unwrap()._limit_port, Some((9100, 9110)));
     assert_eq!(c.client.as_ref().unwrap().map[0].outer, 9100);
 

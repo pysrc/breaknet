@@ -15,3 +15,5 @@ tokio-rustls = { version = "0.23.4" }
 rustls-pemfile = "1.0.2"
 
 bncom = {path = "../bncom"}
+
+channel-mux-with-stream = { git = "https://github.com/pysrc/channel-mux-with-stream.git" }
