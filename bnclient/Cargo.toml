@@ -16,4 +16,4 @@ rustls-pemfile = "1.0.2"
 
 bncom = {path = "../bncom"}
 
-channel-mux-with-stream = { git = "https://github.com/pysrc/channel-mux-with-stream.git" }
+channel-mux-with-stream = { git = "https://github.com/pysrc/channel-mux-with-stream.git" , version = "0.1.1" }
