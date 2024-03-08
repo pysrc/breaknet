@@ -1,9 +1,41 @@
-use std::{io::{BufReader, Cursor}, sync::Arc};
+use std::{fs::File, io::{BufReader, Cursor, Read}, sync::Arc};
 
-use bncom::config::Config;
 use channel_mux_with_stream::{bicopy, cmd, server::{MuxServer, StreamMuxServer}};
+use serde::{Deserialize, Serialize};
 use tokio::{net::TcpStream, time};
 use tokio_rustls::{rustls::{self, ServerName}, webpki, TlsConnector};
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Iomap {
+    pub inner: String,
+    pub outer: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Config {
+    pub server: String,
+    #[serde(rename = "ssl-cert")]
+    pub ssl_cert: String,
+    pub map: Vec<Iomap>,
+}
+
+impl Config {
+    fn from_file(filename: &str) -> Self {
+        let f = File::open(filename);
+        match f {
+            Ok(mut file) => {
+                let mut c = String::new();
+                file.read_to_string(&mut c).unwrap();
+                let cfg: Config = serde_yaml::from_str(&c).unwrap();
+                cfg
+            }
+            Err(e) => {
+                panic!("error {}", e)
+            }
+        }
+    }
+}
 
 pub fn tls_cert(cert: &[u8], name: &str) -> (TlsConnector, ServerName) {
     let cs = Cursor::new(cert);
@@ -28,16 +60,19 @@ pub fn tls_cert(cert: &[u8], name: &str) -> (TlsConnector, ServerName) {
     (connector, server_name)
 }
 
-async fn run(cfg_str: String, cfg: Config) {
-    let client_cfg = cfg.client.unwrap();
-    log::info!("client start->{:#?}", client_cfg);
-    let (connector, server_name) = tls_cert(include_bytes!("../../resources/user-cert.pem"), "breaknet");
-    let conn = TcpStream::connect(client_cfg.server).await.unwrap();
-    let stream = connector.connect(server_name.clone(), conn).await.unwrap();
+async fn run(
+    iomap_str: String, 
+    cfg: Config,
+    connector: TlsConnector,
+    domain: ServerName,
+) {
+    log::info!("client start->\n{:#?}", cfg);
+    let conn = TcpStream::connect(cfg.server).await.unwrap();
+    let stream = connector.connect(domain.clone(), conn).await.unwrap();
     let (mut mux_server, _) = StreamMuxServer::init(stream);
     let (id, _, send, mut vec_pool) = mux_server.accept_channel().await.unwrap();
     let mut first = vec_pool.get().await;
-    first.extend_from_slice(cfg_str.as_bytes());
+    first.extend_from_slice(iomap_str.as_bytes());
     send.send((cmd::PKG, id, Some(first))).unwrap();
     send.send((cmd::BREAK, id, None)).unwrap();
 
@@ -77,12 +112,24 @@ async fn run(cfg_str: String, cfg: Config) {
 #[tokio::main]
 async fn main() {
     simple_logger::init_with_level(log::Level::Info).unwrap();
-    let (cfg_str, cfg) = bncom::config::get_config();
+
+    let cfg = Config::from_file("bnclient-config.yml");
+    let iomap_str = serde_yaml::to_string(&cfg.map).unwrap();
+
+    let mut cert = Vec::<u8>::new();
+    match File::open(&cfg.ssl_cert) {
+        Ok(mut f) => f.read_to_end(&mut cert).unwrap(),
+        Err(e) => panic!("{}", e)
+    };
+    let (connector, domain) = tls_cert(&cert, "breaknet");
+
     loop {
-        let cfg_str = cfg_str.clone();
         let cfg = cfg.clone();
+        let iomap_str = iomap_str.clone();
+        let connector = connector.clone();
+        let domain = domain.clone();
         let rt = tokio::spawn(async move {
-            run(cfg_str, cfg).await;
+            run(iomap_str, cfg, connector, domain).await;
         });
         _ = rt.await;
         time::sleep(time::Duration::from_secs(1)).await;

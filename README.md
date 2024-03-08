@@ -1,6 +1,6 @@
 # Breaknet
 
-Mapping intranet address to public network
+向日葵、Frp之类的实现
 
 ```text
 +--------------+           |                 +--------+
@@ -14,58 +14,49 @@ Mapping intranet address to public network
     +--------+                              +--------+
 ```
 
-## build
+运行前需要生成ssl认证文件，运行程序：gencertificate
 
-`cargo build --release`
+bnserver是服务端程序，bnclient是客户端程序
 
-## Server
+产物结构如下
 
-`./target/release/bnserver ./bnserver/config.json`
-
-## Client
-
-`./target/release/bnclient ./bnclient/config.json`
-
-## Server config
-
-```json
-{
-    "server": {
-        "key": "helloworld",
-        "port": 8808,
-        "-limit-port": [
-            9100,
-            9110
-        ]
-    }
-}
+```
+bnserver.exe
+bnserver-config.yml
+cert.pem
+key.pem
 ```
 
-## Client config
-
-```json
-{
-    "client": {
-        "key": "helloworld",
-        "server": "127.0.0.1:8808",
-        "map": [
-            {
-                "inner": "127.0.0.1:6379",
-                "outer": 9100
-            },
-            {
-                "inner": "127.0.0.1:80",
-                "outer": 9101
-            }
-        ]
-    }
-}
+```
+bnclient.exe
+bnclient-config.yml
+cert.pem
 ```
 
-**meaning**
 
-```text
-127.0.0.1:9100 = 127.0.0.1:6379
-127.0.0.1:9101 = 127.0.0.1:80
+# 配置样式
+
+## bnserver-config.yml
+
+```yml
+bind: 127.0.0.1:8808
+ssl-cert: ./cert.pem
+ssl-key: ./key.pem
 ```
 
+## bnclient-config.yml
+
+```yml
+# 服务端地址
+server: 127.0.0.1:8808
+# ssl公钥
+ssl-cert: ./cert.pem
+# 内外部地址映射
+# inner代表内网地址
+# outer代表服务端绑定的地址
+map:
+  - inner: 127.0.0.1:8000
+    outer: 0.0.0.0:9000
+  - inner: 127.0.0.1:8000
+    outer: 0.0.0.0:9100
+```

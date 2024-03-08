@@ -7,13 +7,12 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde_yaml = "0.9"
+
 tokio = { version = "1.14.0", features = ["full"] }
 log = "0.4"
 simple_logger = "3.0.0"
 tokio-rustls = { version = "0.23.4" }
 rustls-pemfile = "1.0.2"
-
-bncom = {path = "../bncom"}
 
 channel-mux-with-stream = { git = "https://github.com/pysrc/channel-mux-with-stream.git" , version = "0.1.1" }

@@ -1,20 +1,66 @@
-use std::{io::{BufReader, Cursor}, sync::{atomic::{AtomicBool, Ordering}, Arc}};
+use std::{fs::File, io::{BufReader, Cursor, Read}, sync::{atomic::{AtomicBool, Ordering}, Arc}};
 
 use channel_mux_with_stream::{bicopy, client::{MuxClient, StreamMuxClient}, cmd};
+use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, select, sync::mpsc::unbounded_channel, time};
 use tokio_rustls::{rustls, TlsAcceptor};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Iomap {
+    pub inner: String,
+    pub outer: String,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Config {
+    bind: String,
+    #[serde(rename = "ssl-cert")]
+    ssl_cert: String,
+    #[serde(rename = "ssl-key")]
+    ssl_key: String,
+}
+
+impl Config {
+    fn from_file(filename: &str) -> Self {
+        let f = File::open(filename);
+        match f {
+            Ok(mut file) => {
+                let mut c = String::new();
+                file.read_to_string(&mut c).unwrap();
+                let cfg: Config = serde_yaml::from_str(&c).unwrap();
+                cfg
+            }
+            Err(e) => {
+                panic!("error {}", e)
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    let (_, cfg) = bncom::config::get_config();
     simple_logger::init_with_level(log::Level::Info).unwrap();
-    let server_cfg = cfg.server.unwrap();
-    log::info!("server start->{:#?}", server_cfg);
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", server_cfg.port)).await.unwrap();
+
+    let cfg = Config::from_file("bnserver-config.yml");
+    let mut cert = Vec::<u8>::new();
+    match File::open(&cfg.ssl_cert) {
+        Ok(mut f) => f.read_to_end(&mut cert).unwrap(),
+        Err(e) => panic!("{}", e)
+    };
+    let mut key = Vec::<u8>::new();
+    match File::open(&cfg.ssl_key) {
+        Ok(mut f) => f.read_to_end(&mut key).unwrap(),
+        Err(e) => panic!("{}", e)
+    };
+
+    log::info!("server start->\n{:#?}", cfg);
+    let listener = TcpListener::bind(&cfg.bind).await.unwrap();
     
-    let pubcs = Cursor::new(include_bytes!("../../resources/user-cert.pem"));
+    let pubcs = Cursor::new(cert);
     let mut br = BufReader::new(pubcs);
     let cetrs = rustls_pemfile::certs(&mut br).unwrap();
-    let prics = Cursor::new(include_bytes!("../../resources/user-key.pem"));
+    let prics = Cursor::new(key);
     let mut brk = BufReader::new(prics);
     let keys = rustls_pemfile::pkcs8_private_keys(&mut brk).unwrap();
     let certificate = rustls::Certificate(cetrs[0].clone());
@@ -31,7 +77,6 @@ async fn main() {
 
     while let Ok((stream, _)) = listener.accept().await {
         let tlsacceptor = tlsacceptor.clone();
-        let server_cfg = server_cfg.clone();
         tokio::spawn(async move {
             let stream = match tlsacceptor.accept(stream).await {
                 Ok(x) => x,
@@ -42,25 +87,22 @@ async fn main() {
             };
             let (mut mux_client, stop_recv) = StreamMuxClient::init(stream);
             let (id, mut recv, send, _) = mux_client.new_channel().await;
-            let cfg_bytes = recv.recv().await;
-            if cfg_bytes == None {
+            let iomap_op = recv.recv().await;
+            if iomap_op == None {
                 return;
             }
             send.send((cmd::BREAK, id, None)).unwrap();
-            let cfg_bytes = cfg_bytes.unwrap();
-            let cfg = bncom::config::Config::from_str(&String::from_utf8_lossy(&cfg_bytes)).unwrap();
-            let client_cfg = cfg.client.unwrap();
-            if client_cfg.key != server_cfg.key {
-                log::error!("{} key is not right.", client_cfg.key);
-                return;
-            }
+            let iomap_vec = iomap_op.unwrap();
+            let _iomap: Vec<Iomap> = serde_yaml::from_slice(&iomap_vec).unwrap();
+            log::info!("new client \n{:#?}", _iomap);
+
             let run = Arc::new(AtomicBool::new(true));
             let (income_send, mut income_recv) = unbounded_channel();
-            for iomap in client_cfg.map {
+            for iomap in _iomap {
                 let run = run.clone();
                 let income_send = income_send.clone();
                 tokio::spawn(async move {
-                    let lis = TcpListener::bind(format!("0.0.0.0:{}", iomap.outer)).await.unwrap();
+                    let lis = TcpListener::bind(&iomap.outer).await.unwrap();
                     while run.load(Ordering::Relaxed) {
                         select! {
                             _ = time::sleep(time::Duration::from_secs(1)) => {},
