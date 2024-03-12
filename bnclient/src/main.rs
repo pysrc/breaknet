@@ -73,8 +73,8 @@ async fn run(
     let (id, _, send, mut vec_pool) = mux_server.accept_channel().await.unwrap();
     let mut first = vec_pool.get().await;
     first.extend_from_slice(iomap_str.as_bytes());
-    send.send((cmd::PKG, id, Some(first))).unwrap();
-    send.send((cmd::BREAK, id, None)).unwrap();
+    send.send((cmd::PKG, id, Some(first))).await.unwrap();
+    send.send((cmd::BREAK, id, None)).await.unwrap();
 
     loop {
         let (id, mut recv, send, vec_pool) = if let Some(_t) = mux_server.accept_channel().await {
@@ -101,7 +101,7 @@ async fn run(
                 }
                 Err(e) => {
                     log::error!("{} -> {} open dst error {}", line!(), dst, e);
-                    send.send((cmd::BREAK, id, None)).unwrap();
+                    send.send((cmd::BREAK, id, None)).await.unwrap();
                 }
             }
             log::info!("{} close dst {}", line!(), dst);

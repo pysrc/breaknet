@@ -91,7 +91,7 @@ async fn main() {
             if iomap_op == None {
                 return;
             }
-            send.send((cmd::BREAK, id, None)).unwrap();
+            send.send((cmd::BREAK, id, None)).await.unwrap();
             let iomap_vec = iomap_op.unwrap();
             let _iomap: Vec<Iomap> = serde_yaml::from_slice(&iomap_vec).unwrap();
             log::info!("new client \n{:#?}", _iomap);
@@ -131,7 +131,7 @@ async fn main() {
                             tokio::spawn(async move {
                                 let mut data = vec_pool.get().await;
                                 data.extend_from_slice(addr.as_bytes());
-                                send.send((cmd::PKG, id, Some(data))).unwrap();
+                                send.send((cmd::PKG, id, Some(data))).await.unwrap();
                                 bicopy(id, recv, send, stream, vec_pool).await;
                             });
                         }
