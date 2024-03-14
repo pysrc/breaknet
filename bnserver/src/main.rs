@@ -116,6 +116,7 @@ async fn main() {
                                         let mut _mux_stream = mux_connector.connect().unwrap();
                                         _mux_stream.write_u16(_len).await.unwrap();
                                         _mux_stream.write_all(frd).await.unwrap();
+                                        _mux_stream.flush().await.unwrap();
                                         tokio::spawn(async move {
                                             _ = tokio::io::copy_bidirectional(&mut _conn, &mut _mux_stream).await;
                                             log::info!("close id: {}", _gid);
