@@ -1,4 +1,4 @@
-use std::{fs::File, io::{BufReader, Cursor, Read}, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc}};
+use std::{fs::File, io::{BufReader, Cursor, Read}, num::NonZeroU64, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc}};
 
 use serde::{Deserialize, Serialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, select, time};
@@ -85,7 +85,7 @@ async fn main() {
                     return;
                 }
             };
-            let (mux_connector, mut mux_acceptor, mux_worker) = async_smux::MuxBuilder::server().with_connection(stream).build();
+            let (mux_connector, mut mux_acceptor, mux_worker) = async_smux::MuxBuilder::server().with_keep_alive_interval(NonZeroU64::new(30).unwrap()).with_connection(stream).build();
             let _worker = tokio::spawn(mux_worker);
             let mut _cfg_stream = mux_acceptor.accept().await.unwrap();
             let _len = _cfg_stream.read_u16().await.unwrap();

@@ -1,4 +1,4 @@
-use std::{fs::File, io::{BufReader, Cursor, Read}, sync::Arc};
+use std::{fs::File, io::{BufReader, Cursor, Read}, num::NonZeroU64, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time};
@@ -69,7 +69,7 @@ async fn run(
     let conn = TcpStream::connect(cfg.server).await.unwrap();
     let stream = connector.connect(domain.clone(), conn).await.unwrap();
     
-    let (mux_connector, mut mux_acceptor, mux_worker) = async_smux::MuxBuilder::client().with_connection(stream).build();
+    let (mux_connector, mut mux_acceptor, mux_worker) = async_smux::MuxBuilder::client().with_keep_alive_interval(NonZeroU64::new(30).unwrap()).with_connection(stream).build();
     tokio::spawn(mux_worker);
     let mut _cfg_stream = mux_connector.connect().unwrap();
     _cfg_stream.write_u16(iomap_str.len() as u16).await.unwrap();
