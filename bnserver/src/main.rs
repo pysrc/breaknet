@@ -1,8 +1,7 @@
-use std::{fs::File, io::{BufReader, Cursor, Read}, sync::{atomic::{AtomicBool, Ordering}, Arc}};
+use std::{fs::File, io::{BufReader, Cursor, Read}, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc}};
 
-use channel_mux_with_stream::{bicopy, client::{MuxClient, StreamMuxClient}, cmd};
 use serde::{Deserialize, Serialize};
-use tokio::{net::TcpListener, select, sync::mpsc::unbounded_channel, time};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, select, time};
 use tokio_rustls::{rustls, TlsAcceptor};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -74,9 +73,10 @@ async fn main() {
             .unwrap(),
     );
     let tlsacceptor = TlsAcceptor::from(tlsconfig);
-
+    let global_id = Arc::new(AtomicU64::new(0));
     while let Ok((stream, _)) = listener.accept().await {
         let tlsacceptor = tlsacceptor.clone();
+        let global_id = global_id.clone();
         tokio::spawn(async move {
             let stream = match tlsacceptor.accept(stream).await {
                 Ok(x) => x,
@@ -85,32 +85,41 @@ async fn main() {
                     return;
                 }
             };
-            let (mut mux_client, stop_recv) = StreamMuxClient::init(stream);
-            let (id, mut recv, send, _) = mux_client.new_channel().await;
-            let iomap_op = recv.recv().await;
-            if iomap_op == None {
-                return;
-            }
-            send.send((cmd::BREAK, id, None)).await.unwrap();
-            let iomap_vec = iomap_op.unwrap();
+            let (mux_connector, mut mux_acceptor, mux_worker) = async_smux::MuxBuilder::server().with_connection(stream).build();
+            let _worker = tokio::spawn(mux_worker);
+            let mut _cfg_stream = mux_acceptor.accept().await.unwrap();
+            let _len = _cfg_stream.read_u16().await.unwrap();
+            let mut iomap_vec = vec![0u8; _len as usize];
+            _cfg_stream.read_exact(&mut iomap_vec).await.unwrap();
+            _ = _cfg_stream.shutdown().await;
             let _iomap: Vec<Iomap> = serde_yaml::from_slice(&iomap_vec).unwrap();
             log::info!("new client \n{:#?}", _iomap);
 
             let run = Arc::new(AtomicBool::new(true));
-            let (income_send, mut income_recv) = unbounded_channel();
             for iomap in _iomap {
                 let run = run.clone();
-                let income_send = income_send.clone();
+                let mux_connector = mux_connector.clone();
+                let global_id = global_id.clone();
                 tokio::spawn(async move {
                     let lis = TcpListener::bind(&iomap.outer).await.unwrap();
+                    let _len = iomap.inner.len() as u16;
+                    let frd = iomap.inner.as_bytes();
                     while run.load(Ordering::Relaxed) {
                         select! {
                             _ = time::sleep(time::Duration::from_secs(1)) => {},
                             _income = lis.accept() => {
                                 match _income {
-                                    Ok((conn, _)) => {
+                                    Ok((mut _conn, _)) => {
                                         // 新通道
-                                        income_send.send((iomap.inner.clone(), conn)).unwrap();
+                                        let _gid = global_id.fetch_add(1, Ordering::Relaxed);
+                                        log::info!("open dst: {} id: {}", iomap.inner, _gid);
+                                        let mut _mux_stream = mux_connector.connect().unwrap();
+                                        _mux_stream.write_u16(_len).await.unwrap();
+                                        _mux_stream.write_all(frd).await.unwrap();
+                                        tokio::spawn(async move {
+                                            _ = tokio::io::copy_bidirectional(&mut _conn, &mut _mux_stream).await;
+                                            log::info!("close id: {}", _gid);
+                                        });
                                     }
                                     Err(e) => {
                                         log::error!("{} -> {}", line!(), e);
@@ -123,28 +132,9 @@ async fn main() {
                     log::info!("{} break port {}", line!(), iomap.outer);
                 });
             }
-            let st = tokio::spawn(async move {
-                loop {
-                    match income_recv.recv().await {
-                        Some((addr, stream)) => {
-                            let (id, recv, send, mut vec_pool) = mux_client.new_channel().await;
-                            tokio::spawn(async move {
-                                let mut data = vec_pool.get().await;
-                                data.extend_from_slice(addr.as_bytes());
-                                send.send((cmd::PKG, id, Some(data))).await.unwrap();
-                                bicopy(id, recv, send, stream, vec_pool).await;
-                            });
-                        }
-                        None => {
-                            log::error!("{}->None", line!());
-                            return;
-                        }
-                    }
-                }
-            });
-            _ = stop_recv.await;
+            _ = _worker.await;
             run.store(false, Ordering::Relaxed);
-            st.abort();
+            log::info!("end");
         });
     }
 }

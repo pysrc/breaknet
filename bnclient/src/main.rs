@@ -1,8 +1,7 @@
 use std::{fs::File, io::{BufReader, Cursor, Read}, sync::Arc};
 
-use channel_mux_with_stream::{bicopy, cmd, server::{MuxServer, StreamMuxServer}};
 use serde::{Deserialize, Serialize};
-use tokio::{net::TcpStream, time};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, time};
 use tokio_rustls::{rustls::{self, ServerName}, webpki, TlsConnector};
 
 
@@ -69,39 +68,31 @@ async fn run(
     log::info!("client start->\n{:#?}", cfg);
     let conn = TcpStream::connect(cfg.server).await.unwrap();
     let stream = connector.connect(domain.clone(), conn).await.unwrap();
-    let (mut mux_server, _) = StreamMuxServer::init(stream);
-    let (id, _, send, mut vec_pool) = mux_server.accept_channel().await.unwrap();
-    let mut first = vec_pool.get().await;
-    first.extend_from_slice(iomap_str.as_bytes());
-    send.send((cmd::PKG, id, Some(first))).await.unwrap();
-    send.send((cmd::BREAK, id, None)).await.unwrap();
-
+    
+    let (mux_connector, mut mux_acceptor, mux_worker) = async_smux::MuxBuilder::client().with_connection(stream).build();
+    tokio::spawn(mux_worker);
+    let mut _cfg_stream = mux_connector.connect().unwrap();
+    _cfg_stream.write_u16(iomap_str.len() as u16).await.unwrap();
+    _cfg_stream.write_all(iomap_str.as_bytes()).await.unwrap();
+    _cfg_stream.flush().await.unwrap();
+    _cfg_stream.shutdown().await.unwrap();
     loop {
-        let (id, mut recv, send, vec_pool) = if let Some(_t) = mux_server.accept_channel().await {
-            _t
-        } else {
-            log::info!("{} stream close.", line!());
-            return;
-        };
+        let mut _stream = mux_acceptor.accept().await.unwrap();
         tokio::spawn(async move {
-            let _data = match recv.recv().await {
-                Some(_d) => _d,
-                None => {
-                    log::info!("{} recv close {}", line!(), id);
-                    return;
-                }
-            };
+            let _len = _stream.read_u16().await.unwrap() as usize;
+            let mut _dst_data = vec![0u8; _len];
+            _stream.read_exact(&mut _dst_data).await.unwrap();
             // 解析地址
-            let dst = String::from_utf8_lossy(&_data).to_string();
+            let dst = String::from_utf8_lossy(&_dst_data).to_string();
             log::info!("{} open dst {}", line!(), dst);
             match TcpStream::connect(&dst).await {
-                Ok(stream) => {
+                Ok(mut _inner_stream) => {
                     log::info!("{} open dst success {}", line!(), dst);
-                    bicopy(id, recv, send, stream, vec_pool.clone()).await;
+                    _ = tokio::io::copy_bidirectional(&mut _stream, &mut _inner_stream).await;
                 }
                 Err(e) => {
                     log::error!("{} -> {} open dst error {}", line!(), dst, e);
-                    send.send((cmd::BREAK, id, None)).await.unwrap();
+                    _ = _stream.shutdown().await;
                 }
             }
             log::info!("{} close dst {}", line!(), dst);

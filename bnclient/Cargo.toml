@@ -15,4 +15,5 @@ simple_logger = "3.0.0"
 tokio-rustls = { version = "0.23.4" }
 rustls-pemfile = "1.0.2"
 
-channel-mux-with-stream = { git = "https://github.com/pysrc/channel-mux-with-stream.git", branch = "0.1.11" }
+async_smux = "0.3"
+
